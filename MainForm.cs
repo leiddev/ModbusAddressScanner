@@ -583,7 +583,17 @@ namespace ModbusAddressScanner
             cboDataBits.Enabled = isIdle;
             cboParity.Enabled = isIdle;
             cboStopBits.Enabled = isIdle;
+            // 读超时设置框：扫描中不允许修改
+            tb_readTimeout.Enabled = isIdle;
+            // 扫描控制组内的参数：扫描中不允许修改（避免扫描中途改变探测目标）
+            tb_readRegisterStart.Enabled = isIdle;
+            tb_readRegisterCount.Enabled = isIdle;
+            chkFunc01.Enabled = isIdle;
+            chkFunc02.Enabled = isIdle;
+            chkFunc03.Enabled = isIdle;
+            chkFunc04.Enabled = isIdle;
             btnStart.Enabled = isIdle;
+            // 停止按钮是扫描期间唯一可用的按钮
             btnStop.Enabled = !isIdle;
         }
         #endregion
