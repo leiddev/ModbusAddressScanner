@@ -138,13 +138,15 @@ namespace ModbusAddressScanner
         /// </summary>
         private async void StartScan()
         {
-            if (!InitSerialPort())
-                return;
+            // 先校验寄存器参数再打开串口：否则参数错误时串口已被 Open() 却直接 return，
+            // 会一直占用串口句柄直到下次扫描或关闭程序
             if (!checkRegisterParam())
             {
                 Log("寄存器参数有误，请检查");
                 return;
             }
+            if (!InitSerialPort())
+                return;
             _isScanning = true;
             _cancellationTokenSource = new CancellationTokenSource();
             var token = _cancellationTokenSource.Token;
