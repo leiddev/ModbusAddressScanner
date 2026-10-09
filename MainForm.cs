@@ -237,12 +237,12 @@ namespace ModbusAddressScanner
                         Log($"✅ 发现从机地址：{address}（累计 {foundAddresses.Count} 个，继续扫描...）");
                     }
 
-                    // 每 50 个地址输出一次进度即可。
+                    // 每 10 个地址输出一次进度即可（247 个地址共 24 行）。
                     // 原先每个地址输出 2 行日志、247 个地址共 500+ 行，
                     // 且每行都执行一次 ScrollToCaret 触发重绘，严重拖慢扫描速度。
                     // 这里也不需要额外的扫描间隔：每次探测失败都已经等待了完整的读超时，
                     // 总线上的空闲时间远超 Modbus 要求的 3.5 个字符时间
-                    if (address % 50 == 0)
+                    if (address % 10 == 0)
                         Log($"[进度] 已扫描 {address}/247，已发现 {foundAddresses.Count} 个从机...");
                 }
 
