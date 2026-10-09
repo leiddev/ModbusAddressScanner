@@ -208,6 +208,8 @@ namespace ModbusAddressScanner
 
             Stopwatch stopwatch = Stopwatch.StartNew();
             int scannedCount = 0;
+            // 收集扫描到的所有从机地址：发现设备后不停止，继续扫描完整个地址段
+            var foundAddresses = new List<byte>();
 
             try
             {
@@ -217,7 +219,9 @@ namespace ModbusAddressScanner
                 {
                     if (token.IsCancellationRequested)
                     {
-                        Log("扫描已取消");
+                        Log(foundAddresses.Count > 0
+                            ? $"扫描已取消，已发现的从机地址：{string.Join("、", foundAddresses)}"
+                            : "扫描已取消");
                         break;
                     }
 
@@ -228,11 +232,9 @@ namespace ModbusAddressScanner
 
                     if (hasResponse)
                     {
-                        // 收到返回，停止扫描
-                        Log($"✅ 地址 {address} 响应成功！扫描停止（耗时 {stopwatch.Elapsed.TotalSeconds:F1} 秒）");
-                        MessageBox.Show($"找到有效Modbus地址：{address}", "扫描成功",
-                            MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        break;
+                        // 找到设备后不停止扫描，记录地址并继续往下扫描，最后统一汇总
+                        foundAddresses.Add(address);
+                        Log($"✅ 发现从机地址：{address}（累计 {foundAddresses.Count} 个，继续扫描...）");
                     }
 
                     // 每 50 个地址输出一次进度即可。
@@ -241,14 +243,27 @@ namespace ModbusAddressScanner
                     // 这里也不需要额外的扫描间隔：每次探测失败都已经等待了完整的读超时，
                     // 总线上的空闲时间远超 Modbus 要求的 3.5 个字符时间
                     if (address % 50 == 0)
-                        Log($"[进度] 已扫描 {address}/247，继续中...");
+                        Log($"[进度] 已扫描 {address}/247，已发现 {foundAddresses.Count} 个从机...");
                 }
 
                 if (!token.IsCancellationRequested && _isScanning)
                 {
-                    Log($"❌ 扫描完成，未找到有效地址（共探测 {scannedCount} 个地址，耗时 {stopwatch.Elapsed.TotalSeconds:F1} 秒）");
-                    MessageBox.Show("所有地址扫描完毕，未收到任何响应", "扫描完成",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    double elapsedSeconds = stopwatch.Elapsed.TotalSeconds;
+
+                    if (foundAddresses.Count > 0)
+                    {
+                        string addressList = string.Join("、", foundAddresses);
+                        Log($"✅ 扫描完成，共找到 {foundAddresses.Count} 个从机地址：{addressList}（耗时 {elapsedSeconds:F1} 秒）");
+                        MessageBox.Show(
+                            $"共找到 {foundAddresses.Count} 个有效Modbus地址：\n\n{addressList}\n\n扫描耗时 {elapsedSeconds:F1} 秒",
+                            "扫描完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    else
+                    {
+                        Log($"❌ 扫描完成，未找到有效地址（共探测 {scannedCount} 个地址，耗时 {elapsedSeconds:F1} 秒）");
+                        MessageBox.Show("所有地址扫描完毕，未收到任何响应", "扫描完成",
+                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
                 }
             }
             catch (OperationCanceledException)
