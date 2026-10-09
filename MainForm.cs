@@ -153,12 +153,14 @@ namespace ModbusAddressScanner
 
             // 更新UI状态
             UpdateControlStates(false);
-            Log("开始扫描Modbus地址（0-254）...");
+            Log("开始扫描Modbus地址（1-247）...");
 
             try
             {
                 // 地址从0到254递增扫描
-                for (byte address = 0; address <= 254; address++)
+                // 地址 0 为广播地址（从机不应答），248~255 为保留地址，
+                // 因此只在 Modbus RTU 合法的从机地址范围 1~247 内扫描
+                for (byte address = 1; address <= 247; address++)
                 {
                     if (token.IsCancellationRequested)
                     {
