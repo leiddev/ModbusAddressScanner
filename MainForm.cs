@@ -1,6 +1,7 @@
 ﻿using Modbus.Device;
 using Modbus.Extensions.Enron;
 using System;
+using System.Diagnostics;
 using System.IO.Ports;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,9 +15,9 @@ namespace ModbusAddressScanner
     public partial class MainForm : Form
     {
         // 串口相关变量
-        private System.IO.Ports.SerialPort _serialPort;
-        private ModbusSerialMaster _modbusMaster;
-        private CancellationTokenSource _cancellationTokenSource;
+        private System.IO.Ports.SerialPort? _serialPort;
+        private ModbusSerialMaster? _modbusMaster;
+        private CancellationTokenSource? _cancellationTokenSource;
         private bool _isScanning;
         //发送读modbus寄存器指令中的起始地址和读寄存器个数
         private int readRegistersStart;
@@ -76,22 +77,28 @@ namespace ModbusAddressScanner
         {
             try
             {
-                // 关闭已打开的串口
-                if (_serialPort != null && _serialPort.IsOpen)
-                    _serialPort.Close();
+                // 释放上一次扫描遗留的串口与主机资源
+                CloseSerialPort();
+
+                int baudRate = int.Parse(cboBaudRate.SelectedItem!.ToString()!);
 
                 // 创建新串口实例
                 _serialPort = new SerialPort(
-                    cboPort.SelectedItem.ToString(),
-                    int.Parse(cboBaudRate.SelectedItem.ToString()),
-                    (Parity)Enum.Parse(typeof(Parity), cboParity.SelectedItem.ToString()),
-                    int.Parse(cboDataBits.SelectedItem.ToString()),
-                    (StopBits)Enum.Parse(typeof(StopBits), cboStopBits.SelectedItem.ToString())
+                    cboPort.SelectedItem!.ToString()!,
+                    baudRate,
+                    (Parity)Enum.Parse(typeof(Parity), cboParity.SelectedItem!.ToString()!),
+                    int.Parse(cboDataBits.SelectedItem!.ToString()!),
+                    (StopBits)Enum.Parse(typeof(StopBits), cboStopBits.SelectedItem!.ToString()!)
                 );
 
                 // 串口参数配置
                 _serialPort.Handshake = Handshake.None;
-                _serialPort.ReadTimeout = 1000; // 读取超时1秒
+
+                // 读超时按波特率估算，而不是一律 1 秒：
+                // 高波特率下 1 秒的等待绝大部分是浪费（扫描耗时被放大数倍），
+                // 低波特率下又必须留够整帧的传输时间，否则会漏掉响应偏慢的从机
+                int readTimeout = CalcReadTimeout(baudRate);
+                _serialPort.ReadTimeout = readTimeout;
                 _serialPort.WriteTimeout = 1000; // 写入超时1秒
 
                 // 打开串口
@@ -99,10 +106,10 @@ namespace ModbusAddressScanner
 
                 // 创建Modbus RTU主机
                 _modbusMaster = ModbusSerialMaster.CreateRtu(_serialPort);
-                _modbusMaster.Transport.ReadTimeout = 1000;
+                _modbusMaster.Transport.ReadTimeout = readTimeout;
                 _modbusMaster.Transport.Retries = 0; // 不重试，提高扫描效率
 
-                Log($"串口初始化成功：{_serialPort.PortName}");
+                Log($"串口初始化成功：{_serialPort.PortName}（波特率 {baudRate}，读超时 {readTimeout} ms）");
                 return true;
             }
             catch (Exception ex)
@@ -113,22 +120,66 @@ namespace ModbusAddressScanner
         }
 
         /// <summary>
-        /// 关闭串口
+        /// 按波特率估算单次读操作的合理超时时间
+        /// </summary>
+        /// <param name="baudRate">波特率</param>
+        /// <returns>读超时毫秒数</returns>
+        private static int CalcReadTimeout(int baudRate)
+        {
+            // 最坏响应帧约 256 字节（读125个寄存器），串口每字节 11 位
+            // （1起始位 + 8数据位 + 1校验位 + 1停止位）
+            double frameMs = 256.0 * 11.0 * 1000.0 / baudRate;
+
+            // 加 200ms 从机处理余量；下限 300ms 避免偶发干扰造成误判，
+            // 上限 2000ms 兜底异常波特率
+            return Math.Clamp((int)frameMs + 200, 300, 2000);
+        }
+
+        /// <summary>
+        /// 关闭并释放串口与Modbus主机资源
         /// </summary>
         private void CloseSerialPort()
         {
+            bool wasOpen = false;
             try
             {
-                if (_serialPort != null && _serialPort.IsOpen)
-                {
-                    _serialPort.Close();
-                    Log("串口已关闭");
-                }
+                wasOpen = _serialPort != null && _serialPort.IsOpen;
+            }
+            catch
+            {
+                // 串口可能已被释放，忽略
+            }
+
+            // ModbusSerialMaster 实现了 IDisposable，且内部持有串口，必须先释放
+            try
+            {
+                _modbusMaster?.Dispose();
             }
             catch (Exception ex)
             {
-                Log($"关闭串口失败：{ex.Message}");
+                Log($"释放Modbus主机失败：{ex.Message}");
             }
+            finally
+            {
+                _modbusMaster = null;
+            }
+
+            // 只调用 Close() 不会释放 SerialPort 内部的流与事件轮询线程，必须 Dispose()
+            try
+            {
+                _serialPort?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Log($"释放串口失败：{ex.Message}");
+            }
+            finally
+            {
+                _serialPort = null;
+            }
+
+            if (wasOpen)
+                Log("串口已关闭");
         }
         #endregion
 
@@ -155,9 +206,11 @@ namespace ModbusAddressScanner
             UpdateControlStates(false);
             Log("开始扫描Modbus地址（1-247）...");
 
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            int scannedCount = 0;
+
             try
             {
-                // 地址从0到254递增扫描
                 // 地址 0 为广播地址（从机不应答），248~255 为保留地址，
                 // 因此只在 Modbus RTU 合法的从机地址范围 1~247 内扫描
                 for (byte address = 1; address <= 247; address++)
@@ -168,27 +221,32 @@ namespace ModbusAddressScanner
                         break;
                     }
 
-                    Log($"正在扫描地址：{address}");
-
-                    // 发送Modbus指令（读取保持寄存器，示例：地址0，长度1）
-                    bool hasResponse = await SendModbusRequest(address, token);
+                    // 只在第一个地址失败时记录异常原因，便于排查串口/接线问题；
+                    // 其余地址不再逐条记录，避免刷屏
+                    bool hasResponse = await SendModbusRequest(address, token, scannedCount == 0);
+                    scannedCount++;
 
                     if (hasResponse)
                     {
                         // 收到返回，停止扫描
-                        Log($"✅ 地址 {address} 响应成功！扫描停止");
+                        Log($"✅ 地址 {address} 响应成功！扫描停止（耗时 {stopwatch.Elapsed.TotalSeconds:F1} 秒）");
                         MessageBox.Show($"找到有效Modbus地址：{address}", "扫描成功",
                             MessageBoxButtons.OK, MessageBoxIcon.Information);
                         break;
                     }
 
-                    // 扫描间隔（可调整，避免发送过快）
-                    await Task.Delay(100, token);
+                    // 每 50 个地址输出一次进度即可。
+                    // 原先每个地址输出 2 行日志、247 个地址共 500+ 行，
+                    // 且每行都执行一次 ScrollToCaret 触发重绘，严重拖慢扫描速度。
+                    // 这里也不需要额外的扫描间隔：每次探测失败都已经等待了完整的读超时，
+                    // 总线上的空闲时间远超 Modbus 要求的 3.5 个字符时间
+                    if (address % 50 == 0)
+                        Log($"[进度] 已扫描 {address}/247，继续中...");
                 }
 
                 if (!token.IsCancellationRequested && _isScanning)
                 {
-                    Log("❌ 扫描完成，未找到有效地址");
+                    Log($"❌ 扫描完成，未找到有效地址（共探测 {scannedCount} 个地址，耗时 {stopwatch.Elapsed.TotalSeconds:F1} 秒）");
                     MessageBox.Show("所有地址扫描完毕，未收到任何响应", "扫描完成",
                         MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
@@ -206,6 +264,9 @@ namespace ModbusAddressScanner
                 // 清理资源
                 _isScanning = false;
                 CloseSerialPort();
+                // CancellationTokenSource 同样实现了 IDisposable，每次扫描新建，必须释放
+                _cancellationTokenSource?.Dispose();
+                _cancellationTokenSource = null;
                 UpdateControlStates(true);
             }
         }
@@ -255,18 +316,24 @@ namespace ModbusAddressScanner
         /// </summary>
         /// <param name="slaveAddress">从站地址</param>
         /// <param name="token">取消令牌</param>
+        /// <param name="logFailure">无响应时是否输出日志（默认关闭，避免 247 个地址刷屏）</param>
         /// <returns>是否收到响应</returns>
-        private async Task<bool> SendModbusRequest(byte slaveAddress, CancellationToken token)
+        private async Task<bool> SendModbusRequest(byte slaveAddress, CancellationToken token, bool logFailure = false)
         {
             try
             {
                 // 示例：读取保持寄存器（功能码0x03），寄存器地址0，读取1个寄存器
                 // 可根据实际需求修改功能码和参数
+                // 取本地引用，避免串口已被释放时在后台线程访问到 null 字段
+                var master = _modbusMaster;
+                if (master == null)
+                    return false;
+
                 var result = await Task.Run(() =>
                 {
-                    return _modbusMaster.ReadHoldingRegisters(
+                    return master.ReadHoldingRegisters(
                         slaveAddress, // 从站地址
-                        (ushort)readRegistersStart,            // 寄存器起始地址,1004-固件版本号
+                        (ushort)readRegistersStart,            // 寄存器起始地址
                         (ushort)readRegistersCount             // 读取寄存器数量
                     );
                 }, token);
@@ -290,7 +357,8 @@ namespace ModbusAddressScanner
             catch (Exception ex)
             {
                 // 读超时、CRC校验失败等才会走到这里，说明该地址确实无响应
-                Log($"地址 {slaveAddress} 无响应：{ex.Message.Split('\n')[0]}");
+                if (logFailure)
+                    Log($"地址 {slaveAddress} 无响应：{ex.Message.Split('\n')[0]}");
                 return false;
             }
         }
@@ -300,9 +368,11 @@ namespace ModbusAddressScanner
         /// </summary>
         private void StopScan()
         {
-            if (_cancellationTokenSource != null && !_cancellationTokenSource.IsCancellationRequested)
+            // 取本地引用，避免在 Cancel() 与释放之间出现竞争
+            var cts = _cancellationTokenSource;
+            if (cts != null && !cts.IsCancellationRequested)
             {
-                _cancellationTokenSource.Cancel();
+                cts.Cancel();
                 _isScanning = false;
                 Log("正在停止扫描...");
             }
@@ -316,9 +386,14 @@ namespace ModbusAddressScanner
         /// <param name="message">日志内容</param>
         private void Log(string message)
         {
+            // 窗体正在关闭或已释放时直接丢弃日志，避免抛 ObjectDisposedException
+            if (IsDisposed || !IsHandleCreated)
+                return;
+
             if (txtLog.InvokeRequired)
             {
-                txtLog.Invoke(new Action(() => Log(message)));
+                // 用 BeginInvoke 异步投递，避免关闭过程中同步等待造成死锁
+                txtLog.BeginInvoke(new Action(() => Log(message)));
                 return;
             }
 
@@ -332,6 +407,9 @@ namespace ModbusAddressScanner
         /// <param name="isIdle">是否处于空闲状态</param>
         private void UpdateControlStates(bool isIdle)
         {
+            if (IsDisposed || !IsHandleCreated)
+                return;
+
             if (InvokeRequired)
             {
                 Invoke(new Action<bool>(UpdateControlStates), isIdle);
