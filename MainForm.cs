@@ -266,6 +266,9 @@ namespace ModbusAddressScanner
             int scannedCount = 0;
             // 收集扫描到的所有从机地址（含命中的功能码）：发现设备后不停止，继续扫描完整个地址段
             var foundAddresses = new List<string>();
+            // 扫描完成后的弹窗内容：在 try 内只组装文本，等 finally 释放完串口再真正弹出。
+            // 否则 MessageBox 是模态阻塞的，弹窗期间串口会一直被占用
+            string? completionText = null;
 
             try
             {
@@ -310,15 +313,12 @@ namespace ModbusAddressScanner
                     {
                         string addressList = string.Join("、", foundAddresses);
                         Log($"✅ 扫描完成，共找到 {foundAddresses.Count} 个从机地址：{addressList}（耗时 {elapsedSeconds:F1} 秒）");
-                        MessageBox.Show(
-                            $"共找到 {foundAddresses.Count} 个有效Modbus地址：\n\n{addressList}\n\n扫描耗时 {elapsedSeconds:F1} 秒",
-                            "扫描完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        completionText = $"共找到 {foundAddresses.Count} 个有效Modbus地址：\n\n{addressList}\n\n扫描耗时 {elapsedSeconds:F1} 秒";
                     }
                     else
                     {
                         Log($"❌ 扫描完成，未找到有效地址（共探测 {scannedCount} 个地址，耗时 {elapsedSeconds:F1} 秒）");
-                        MessageBox.Show("所有地址扫描完毕，未收到任何响应", "扫描完成",
-                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        completionText = "所有地址扫描完毕，未收到任何响应";
                     }
                 }
             }
@@ -339,6 +339,13 @@ namespace ModbusAddressScanner
                 _cancellationTokenSource?.Dispose();
                 _cancellationTokenSource = null;
                 UpdateControlStates(true);
+            }
+
+            // 串口已在 finally 中释放完毕，此时再弹出模态对话框，
+            // 避免弹窗期间串口一直被占用（用户点确定前无法重新开始扫描）
+            if (completionText != null)
+            {
+                MessageBox.Show(completionText, "扫描完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
         
