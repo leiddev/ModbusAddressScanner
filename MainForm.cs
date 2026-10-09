@@ -22,6 +22,8 @@ namespace ModbusAddressScanner
         //发送读modbus寄存器指令中的起始地址和读寄存器个数
         private int readRegistersStart;
         private int readRegistersCount;
+        // 手动指定的读超时（毫秒），null 表示界面留空、按波特率自动计算
+        private int? manualReadTimeoutMs;
         public MainForm()
         {
             InitializeComponent();
@@ -65,6 +67,9 @@ namespace ModbusAddressScanner
             btnStop.Enabled = false;
             txtLog.ReadOnly = true;
             _isScanning = false;
+
+            // 读超时留空即按波特率自动计算
+            tb_readTimeout.PlaceholderText = "自动";
         }
         #endregion
 
@@ -94,10 +99,19 @@ namespace ModbusAddressScanner
                 // 串口参数配置
                 _serialPort.Handshake = Handshake.None;
 
-                // 读超时按波特率估算，而不是一律 1 秒：
-                // 高波特率下 1 秒的等待绝大部分是浪费（扫描耗时被放大数倍），
+                // 读超时优先取界面手动设置的值，留空时按波特率估算。
+                // 固定 1 秒并不合适：高波特率下绝大部分等待是浪费（扫描耗时被放大数倍），
                 // 低波特率下又必须留够整帧的传输时间，否则会漏掉响应偏慢的从机
-                int readTimeout = CalcReadTimeout(baudRate);
+                int autoReadTimeout = CalcReadTimeout(baudRate);
+                int readTimeout = manualReadTimeoutMs ?? autoReadTimeout;
+
+                // 手动值低于自动建议值时给出提醒：可能从机还没来得及应答就被判为无响应
+                if (manualReadTimeoutMs.HasValue && manualReadTimeoutMs.Value < autoReadTimeout)
+                {
+                    Log($"提示：手动设置的读超时 {manualReadTimeoutMs.Value} ms 低于当前波特率的建议值 {autoReadTimeout} ms，" +
+                        "响应较慢的从机可能被漏掉");
+                }
+
                 _serialPort.ReadTimeout = readTimeout;
                 _serialPort.WriteTimeout = 1000; // 写入超时1秒
 
@@ -109,7 +123,8 @@ namespace ModbusAddressScanner
                 _modbusMaster.Transport.ReadTimeout = readTimeout;
                 _modbusMaster.Transport.Retries = 0; // 不重试，提高扫描效率
 
-                Log($"串口初始化成功：{_serialPort.PortName}（波特率 {baudRate}，读超时 {readTimeout} ms）");
+                Log($"串口初始化成功：{_serialPort.PortName}（波特率 {baudRate}，读超时 {readTimeout} ms" +
+                    $"{(manualReadTimeoutMs.HasValue ? "，手动设置" : "，自动计算")}）");
                 return true;
             }
             catch (Exception ex)
@@ -196,6 +211,8 @@ namespace ModbusAddressScanner
                 Log("寄存器参数有误，请检查");
                 return;
             }
+            if (!checkReadTimeoutParam())
+                return;
             if (!InitSerialPort())
                 return;
             _isScanning = true;
@@ -323,6 +340,37 @@ namespace ModbusAddressScanner
                 return false;
             }
 
+            return true;
+        }
+
+        /// <summary>
+        /// 校验读超时设置：界面留空表示按波特率自动计算
+        /// </summary>
+        /// <returns>输入参数是否正常</returns>
+        private bool checkReadTimeoutParam()
+        {
+            string text = tb_readTimeout.Text.Trim();
+
+            // 留空 -> 按波特率自动计算
+            if (text.Length == 0)
+            {
+                manualReadTimeoutMs = null;
+                return true;
+            }
+
+            if (!int.TryParse(text, out int readTimeout))
+            {
+                Log("参数错误：读超时必须是整数（单位：毫秒），留空表示按波特率自动计算");
+                return false;
+            }
+
+            if (readTimeout < 1 || readTimeout > 60000)
+            {
+                Log($"参数错误：读超时 {readTimeout} ms 超出范围（1 ~ 60000 毫秒）");
+                return false;
+            }
+
+            manualReadTimeoutMs = readTimeout;
             return true;
         }
 

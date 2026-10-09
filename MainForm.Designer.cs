@@ -33,6 +33,8 @@ namespace ModbusAddressScanner
             label7 = new Label();
             tb_readRegisterStart = new TextBox();
             label6 = new Label();
+            label8 = new Label();
+            tb_readTimeout = new TextBox();
             btnStop = new Button();
             btnStart = new Button();
             gbLog = new GroupBox();
@@ -54,6 +56,8 @@ namespace ModbusAddressScanner
             gbSerialConfig.Controls.Add(label2);
             gbSerialConfig.Controls.Add(cboPort);
             gbSerialConfig.Controls.Add(label1);
+            gbSerialConfig.Controls.Add(tb_readTimeout);
+            gbSerialConfig.Controls.Add(label8);
             gbSerialConfig.Location = new Point(22, 20);
             gbSerialConfig.Margin = new Padding(6, 5, 6, 5);
             gbSerialConfig.Name = "gbSerialConfig";
@@ -62,6 +66,24 @@ namespace ModbusAddressScanner
             gbSerialConfig.TabIndex = 0;
             gbSerialConfig.TabStop = false;
             gbSerialConfig.Text = "串口配置";
+            //
+            // label8
+            //
+            label8.AutoSize = true;
+            label8.Location = new Point(370, 114);
+            label8.Margin = new Padding(6, 0, 6, 0);
+            label8.Name = "label8";
+            label8.Size = new Size(150, 28);
+            label8.TabIndex = 10;
+            label8.Text = "读超时(ms):";
+            //
+            // tb_readTimeout
+            //
+            tb_readTimeout.Location = new Point(545, 109);
+            tb_readTimeout.Margin = new Padding(6, 5, 6, 5);
+            tb_readTimeout.Name = "tb_readTimeout";
+            tb_readTimeout.Size = new Size(145, 34);
+            tb_readTimeout.TabIndex = 11;
             // 
             // cboStopBits
             // 
@@ -306,5 +328,7 @@ namespace ModbusAddressScanner
         private TextBox tb_readRegisterStart;
         private Label label6;
         private TextBox tb_readRegisterCount;
+        private Label label8;
+        private TextBox tb_readTimeout;
     }
 }
