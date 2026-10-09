@@ -33,6 +33,11 @@ namespace ModbusAddressScanner
             label7 = new Label();
             tb_readRegisterStart = new TextBox();
             label6 = new Label();
+            label9 = new Label();
+            chkFunc01 = new CheckBox();
+            chkFunc02 = new CheckBox();
+            chkFunc03 = new CheckBox();
+            chkFunc04 = new CheckBox();
             label8 = new Label();
             tb_readTimeout = new TextBox();
             btnStop = new Button();
@@ -186,16 +191,77 @@ namespace ModbusAddressScanner
             gbControl.Controls.Add(label7);
             gbControl.Controls.Add(tb_readRegisterStart);
             gbControl.Controls.Add(label6);
+            gbControl.Controls.Add(label9);
+            gbControl.Controls.Add(chkFunc01);
+            gbControl.Controls.Add(chkFunc02);
+            gbControl.Controls.Add(chkFunc03);
+            gbControl.Controls.Add(chkFunc04);
             gbControl.Controls.Add(btnStop);
             gbControl.Controls.Add(btnStart);
             gbControl.Location = new Point(22, 194);
             gbControl.Margin = new Padding(6, 5, 6, 5);
             gbControl.Name = "gbControl";
             gbControl.Padding = new Padding(6, 5, 6, 5);
-            gbControl.Size = new Size(1320, 115);
+            gbControl.Size = new Size(1320, 200);
             gbControl.TabIndex = 1;
             gbControl.TabStop = false;
             gbControl.Text = "扫描控制";
+            //
+            // label9
+            //
+            label9.AutoSize = true;
+            label9.Location = new Point(13, 118);
+            label9.Margin = new Padding(6, 0, 6, 0);
+            label9.Name = "label9";
+            label9.Size = new Size(130, 28);
+            label9.TabIndex = 6;
+            label9.Text = "读功能码:";
+            //
+            // chkFunc01
+            //
+            chkFunc01.AutoSize = true;
+            chkFunc01.Location = new Point(200, 115);
+            chkFunc01.Margin = new Padding(6, 5, 6, 5);
+            chkFunc01.Name = "chkFunc01";
+            chkFunc01.Size = new Size(120, 32);
+            chkFunc01.TabIndex = 7;
+            chkFunc01.Text = "01 线圈";
+            chkFunc01.UseVisualStyleBackColor = true;
+            //
+            // chkFunc02
+            //
+            chkFunc02.AutoSize = true;
+            chkFunc02.Location = new Point(460, 115);
+            chkFunc02.Margin = new Padding(6, 5, 6, 5);
+            chkFunc02.Name = "chkFunc02";
+            chkFunc02.Size = new Size(170, 32);
+            chkFunc02.TabIndex = 8;
+            chkFunc02.Text = "02 离散输入";
+            chkFunc02.UseVisualStyleBackColor = true;
+            //
+            // chkFunc03
+            //
+            chkFunc03.AutoSize = true;
+            chkFunc03.Checked = true;
+            chkFunc03.CheckState = CheckState.Checked;
+            chkFunc03.Location = new Point(760, 115);
+            chkFunc03.Margin = new Padding(6, 5, 6, 5);
+            chkFunc03.Name = "chkFunc03";
+            chkFunc03.Size = new Size(190, 32);
+            chkFunc03.TabIndex = 9;
+            chkFunc03.Text = "03 保持寄存器";
+            chkFunc03.UseVisualStyleBackColor = true;
+            //
+            // chkFunc04
+            //
+            chkFunc04.AutoSize = true;
+            chkFunc04.Location = new Point(1060, 115);
+            chkFunc04.Margin = new Padding(6, 5, 6, 5);
+            chkFunc04.Name = "chkFunc04";
+            chkFunc04.Size = new Size(190, 32);
+            chkFunc04.TabIndex = 10;
+            chkFunc04.Text = "04 输入寄存器";
+            chkFunc04.UseVisualStyleBackColor = true;
             // 
             // tb_readRegisterCount
             // 
@@ -260,7 +326,7 @@ namespace ModbusAddressScanner
             // gbLog
             // 
             gbLog.Controls.Add(txtLog);
-            gbLog.Location = new Point(22, 320);
+            gbLog.Location = new Point(22, 405);
             gbLog.Margin = new Padding(6, 5, 6, 5);
             gbLog.Name = "gbLog";
             gbLog.Padding = new Padding(6, 5, 6, 5);
@@ -285,7 +351,7 @@ namespace ModbusAddressScanner
             // 
             AutoScaleDimensions = new SizeF(13F, 28F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(1365, 702);
+            ClientSize = new Size(1365, 787);
             Controls.Add(gbLog);
             Controls.Add(gbControl);
             Controls.Add(gbSerialConfig);
@@ -330,5 +396,10 @@ namespace ModbusAddressScanner
         private TextBox tb_readRegisterCount;
         private Label label8;
         private TextBox tb_readTimeout;
+        private Label label9;
+        private CheckBox chkFunc01;
+        private CheckBox chkFunc02;
+        private CheckBox chkFunc03;
+        private CheckBox chkFunc04;
     }
 }

@@ -24,6 +24,10 @@ namespace ModbusAddressScanner
         private int readRegistersCount;
         // 手动指定的读超时（毫秒），null 表示界面留空、按波特率自动计算
         private int? manualReadTimeoutMs;
+        // 本次扫描要依次尝试的读功能码（1=线圈 2=离散输入 3=保持寄存器 4=输入寄存器）
+        private List<byte> selectedFunctionCodes = new List<byte>();
+        // 功能码列表的显示文本，如 "01/03"
+        private string selectedFunctionCodeText = string.Empty;
         public MainForm()
         {
             InitializeComponent();
@@ -213,6 +217,8 @@ namespace ModbusAddressScanner
             }
             if (!checkReadTimeoutParam())
                 return;
+            if (!checkScanFunctionParam())
+                return;
             if (!InitSerialPort())
                 return;
             _isScanning = true;
@@ -221,12 +227,19 @@ namespace ModbusAddressScanner
 
             // 更新UI状态
             UpdateControlStates(false);
-            Log("开始扫描Modbus地址（1-247）...");
+            Log($"开始扫描Modbus地址（1-247），读功能码：{selectedFunctionCodeText}");
+
+            // 每多勾选一个功能码，无响应的地址就要多等一轮读超时
+            if (selectedFunctionCodes.Count > 1)
+            {
+                Log($"提示：已勾选 {selectedFunctionCodes.Count} 个读功能码，每个地址会依次尝试，"
+                    + $"无响应地址的等待时间约为单个功能码的 {selectedFunctionCodes.Count} 倍");
+            }
 
             Stopwatch stopwatch = Stopwatch.StartNew();
             int scannedCount = 0;
-            // 收集扫描到的所有从机地址：发现设备后不停止，继续扫描完整个地址段
-            var foundAddresses = new List<byte>();
+            // 收集扫描到的所有从机地址（含命中的功能码）：发现设备后不停止，继续扫描完整个地址段
+            var foundAddresses = new List<string>();
 
             try
             {
@@ -244,14 +257,14 @@ namespace ModbusAddressScanner
 
                     // 只在第一个地址失败时记录异常原因，便于排查串口/接线问题；
                     // 其余地址不再逐条记录，避免刷屏
-                    bool hasResponse = await SendModbusRequest(address, token, scannedCount == 0);
+                    byte? matchedFunction = await SendModbusRequest(address, token, scannedCount == 0);
                     scannedCount++;
 
-                    if (hasResponse)
+                    if (matchedFunction.HasValue)
                     {
-                        // 找到设备后不停止扫描，记录地址并继续往下扫描，最后统一汇总
-                        foundAddresses.Add(address);
-                        Log($"✅ 发现从机地址：{address}（累计 {foundAddresses.Count} 个，继续扫描...）");
+                        // 找到设备后不停止扫描，记录地址与命中的功能码，继续往下扫描，最后统一汇总
+                        foundAddresses.Add($"{address}（功能码{matchedFunction.Value:D2}）");
+                        Log($"✅ 发现从机地址：{address}（功能码 {matchedFunction.Value:D2}，累计 {foundAddresses.Count} 个，继续扫描...）");
                     }
 
                     // 每 10 个地址输出一次进度即可（247 个地址共 24 行）。
@@ -375,55 +388,107 @@ namespace ModbusAddressScanner
         }
 
         /// <summary>
-        /// 发送Modbus请求并检查响应
+        /// 读取界面上已勾选的读功能码
+        /// </summary>
+        /// <returns>功能码列表（1=线圈 2=离散输入 3=保持寄存器 4=输入寄存器）</returns>
+        private List<byte> GetSelectedFunctionCodes()
+        {
+            var functionCodes = new List<byte>();
+
+            if (chkFunc01.Checked)
+                functionCodes.Add(1);
+            if (chkFunc02.Checked)
+                functionCodes.Add(2);
+            if (chkFunc03.Checked)
+                functionCodes.Add(3);
+            if (chkFunc04.Checked)
+                functionCodes.Add(4);
+
+            return functionCodes;
+        }
+
+        /// <summary>
+        /// 校验读功能码的勾选情况：至少要勾选一个
+        /// </summary>
+        /// <returns>输入参数是否正常</returns>
+        private bool checkScanFunctionParam()
+        {
+            selectedFunctionCodes = GetSelectedFunctionCodes();
+
+            if (selectedFunctionCodes.Count == 0)
+            {
+                Log("参数错误：请至少勾选一个读功能码（01 线圈 / 02 离散输入 / 03 保持寄存器 / 04 输入寄存器）");
+                return false;
+            }
+
+            selectedFunctionCodeText = string.Join("/", selectedFunctionCodes.Select(fc => $"{fc:D2}"));
+            return true;
+        }
+
+        /// <summary>
+        /// 对指定从站地址依次尝试界面上所有已勾选的读功能码，任意一个收到响应即认为该地址存在
         /// </summary>
         /// <param name="slaveAddress">从站地址</param>
         /// <param name="token">取消令牌</param>
         /// <param name="logFailure">无响应时是否输出日志（默认关闭，避免 247 个地址刷屏）</param>
-        /// <returns>是否收到响应</returns>
-        private async Task<bool> SendModbusRequest(byte slaveAddress, CancellationToken token, bool logFailure = false)
+        /// <returns>命中的功能码；null 表示所有已勾选的功能码都没有响应</returns>
+        private async Task<byte?> SendModbusRequest(byte slaveAddress, CancellationToken token, bool logFailure = false)
         {
-            try
-            {
-                // 示例：读取保持寄存器（功能码0x03），寄存器地址0，读取1个寄存器
-                // 可根据实际需求修改功能码和参数
-                // 取本地引用，避免串口已被释放时在后台线程访问到 null 字段
-                var master = _modbusMaster;
-                if (master == null)
-                    return false;
+            // 取本地引用，避免串口已被释放时在后台线程访问到 null 字段
+            var master = _modbusMaster;
+            if (master == null)
+                return null;
 
-                var result = await Task.Run(() =>
+            ushort startAddress = (ushort)readRegistersStart;
+            ushort pointCount = (ushort)readRegistersCount;
+            string? firstError = null;
+
+            foreach (byte functionCode in selectedFunctionCodes)
+            {
+                try
                 {
-                    return master.ReadHoldingRegisters(
-                        slaveAddress, // 从站地址
-                        (ushort)readRegistersStart,            // 寄存器起始地址
-                        (ushort)readRegistersCount             // 读取寄存器数量
-                    );
-                }, token);
+                    bool hasData = await Task.Run(() =>
+                    {
+                        // 01/02 读取位数据（bool[]），03/04 读取字数据（ushort[]）
+                        return functionCode switch
+                        {
+                            1 => master.ReadCoils(slaveAddress, startAddress, pointCount) is { Length: > 0 },
+                            2 => master.ReadInputs(slaveAddress, startAddress, pointCount) is { Length: > 0 },
+                            3 => master.ReadHoldingRegisters(slaveAddress, startAddress, pointCount) is { Length: > 0 },
+                            4 => master.ReadInputRegisters(slaveAddress, startAddress, pointCount) is { Length: > 0 },
+                            _ => false
+                        };
+                    }, token);
 
-                // 有返回结果则表示响应成功
-                return result != null && result.Length > 0;
+                    // 有返回数据表示该功能码响应成功
+                    if (hasData)
+                        return functionCode;
+                }
+                catch (OperationCanceledException)
+                {
+                    // 任务尚未开始执行就被取消，交由 StartScan 统一处理，不要当作"无响应"
+                    throw;
+                }
+                catch (Modbus.SlaveException ex)
+                {
+                    // 从机返回异常响应帧（功能码 | 0x80）说明该从机真实存在，
+                    // 只是拒绝了本次请求（典型情况：该功能码不支持，或请求的地址不存在）。
+                    // 这是一个带合法CRC的完整应答，同样应判定为"发现设备"。
+                    Log($"✅ 地址 {slaveAddress} 存在（功能码 {functionCode:D2} 返回异常码 0x{(byte)ex.SlaveExceptionCode:X2}）");
+                    return functionCode;
+                }
+                catch (Exception ex)
+                {
+                    // 读超时、CRC校验失败等才会走到这里，说明该功能码没有响应
+                    firstError ??= ex.Message.Split('\n')[0];
+                }
             }
-            catch (OperationCanceledException)
-            {
-                // 任务尚未开始执行就被取消，交由 StartScan 统一处理，不要当作"无响应"
-                throw;
-            }
-            catch (Modbus.SlaveException ex)
-            {
-                // 从机返回异常响应帧（功能码 | 0x80）说明该从机真实存在，
-                // 只是拒绝了本次请求（典型情况：请求的寄存器地址不存在）。
-                // 这是一个带合法CRC的完整应答，同样应判定为"发现设备"。
-                Log($"✅ 地址 {slaveAddress} 存在（从机返回异常码 0x{(byte)ex.SlaveExceptionCode:X2}）");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                // 读超时、CRC校验失败等才会走到这里，说明该地址确实无响应
-                if (logFailure)
-                    Log($"地址 {slaveAddress} 无响应：{ex.Message.Split('\n')[0]}");
-                return false;
-            }
+
+            // 所有已勾选的功能码都没有响应：只在需要时记录一次，便于排查串口/接线问题
+            if (logFailure && firstError != null)
+                Log($"地址 {slaveAddress} 无响应（已尝试功能码 {selectedFunctionCodeText}）：{firstError}");
+
+            return null;
         }
 
         /// <summary>
