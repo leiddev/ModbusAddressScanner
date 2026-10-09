@@ -210,17 +210,38 @@ namespace ModbusAddressScanner
         /// <returns>输入参数是否正常</returns>
         private bool checkRegisterParam()
         {
-            try
+            if (!int.TryParse(tb_readRegisterStart.Text.Trim(), out readRegistersStart))
             {
-                readRegistersStart = int.Parse(tb_readRegisterStart.Text.Trim());
-                readRegistersCount = int.Parse(tb_readRegisterCount.Text.Trim());
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Log($"参数错误：{ex.Message}");
+                Log("参数错误：寄存器起始地址必须是 0 ~ 65535 之间的整数");
                 return false;
             }
+
+            if (readRegistersStart < 0 || readRegistersStart > 65535)
+            {
+                Log($"参数错误：寄存器起始地址 {readRegistersStart} 超出范围（0 ~ 65535）");
+                return false;
+            }
+
+            if (!int.TryParse(tb_readRegisterCount.Text.Trim(), out readRegistersCount))
+            {
+                Log("参数错误：寄存器数量必须是 1 ~ 125 之间的整数");
+                return false;
+            }
+
+            // Modbus 功能码 0x03 单次最多读取 125 个寄存器
+            if (readRegistersCount < 1 || readRegistersCount > 125)
+            {
+                Log($"参数错误：寄存器数量 {readRegistersCount} 超出范围（1 ~ 125）");
+                return false;
+            }
+
+            if (readRegistersStart + readRegistersCount > 65536)
+            {
+                Log($"参数错误：起始地址与数量之和 {readRegistersStart + readRegistersCount} 超出 65535 上限");
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
