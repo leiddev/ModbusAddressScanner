@@ -34,9 +34,10 @@ namespace ModbusAddressScanner
         // 扫描的从机地址范围：地址 0 为广播地址（从机不应答），248~255 为保留地址
         private const byte ScanAddressStart = 1;
         private const byte ScanAddressEnd = 247;
-        // 单次探测中除读超时之外的固定开销（发送请求、串口读写、CRC 校验等）约 30ms，
-        // 计入后预计时间更贴近实际，避免系统性低估
-        private const int PerProbeOverheadMs = 30;
+        // 单次探测中除读超时之外的固定开销（发送请求、串口读写、CRC 校验等）。
+        // 按整轮实测校准：9600bps / 读超时 493ms 下 247 个地址实测 135.3 秒，
+        // 即每次探测约 548ms，扣除读超时后固定开销约 55ms
+        private const int PerProbeOverheadMs = 55;
         public MainForm()
         {
             InitializeComponent();
