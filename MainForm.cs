@@ -57,7 +57,7 @@ namespace ModbusAddressScanner
                 cboPort.SelectedIndex = 0;
 
             // 波特率选项
-            cboBaudRate.Items.AddRange(new object[] { 9600, 19200, 38400, 57600, 115200 });
+            cboBaudRate.Items.AddRange(new object[] { 4800, 9600, 19200, 38400, 57600, 115200 });
             cboBaudRate.SelectedItem = 9600;
 
             // 数据位选项
