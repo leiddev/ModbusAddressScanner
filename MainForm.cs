@@ -28,6 +28,15 @@ namespace ModbusAddressScanner
         private List<byte> selectedFunctionCodes = new List<byte>();
         // 功能码列表的显示文本，如 "01/03"
         private string selectedFunctionCodeText = string.Empty;
+        // 本次扫描实际生效的读超时（毫秒），用于开始扫描时估算耗时
+        private int effectiveReadTimeoutMs;
+
+        // 扫描的从机地址范围：地址 0 为广播地址（从机不应答），248~255 为保留地址
+        private const byte ScanAddressStart = 1;
+        private const byte ScanAddressEnd = 247;
+        // 单次探测中除读超时之外的固定开销（发送请求、串口读写、CRC 校验等）约 30ms，
+        // 计入后预计时间更贴近实际，避免系统性低估
+        private const int PerProbeOverheadMs = 30;
         public MainForm()
         {
             InitializeComponent();
@@ -118,6 +127,7 @@ namespace ModbusAddressScanner
 
                 _serialPort.ReadTimeout = readTimeout;
                 _serialPort.WriteTimeout = 1000; // 写入超时1秒
+                effectiveReadTimeoutMs = readTimeout;
 
                 // 打开串口
                 _serialPort.Open();
@@ -152,6 +162,19 @@ namespace ModbusAddressScanner
             // 加 200ms 从机处理余量；下限 300ms 避免偶发干扰造成误判，
             // 上限 2000ms 兜底异常波特率
             return Math.Clamp((int)frameMs + 200, 300, 2000);
+        }
+
+        /// <summary>
+        /// 将秒数格式化为便于阅读的时长文本
+        /// </summary>
+        /// <param name="seconds">秒数</param>
+        private static string FormatDuration(double seconds)
+        {
+            if (seconds < 60)
+                return $"{seconds:F1} 秒";
+
+            int totalSeconds = (int)Math.Round(seconds);
+            return $"{totalSeconds / 60} 分 {totalSeconds % 60} 秒";
         }
 
         /// <summary>
@@ -227,14 +250,16 @@ namespace ModbusAddressScanner
 
             // 更新UI状态
             UpdateControlStates(false);
-            Log($"开始扫描Modbus地址（1-247），读功能码：{selectedFunctionCodeText}");
+            Log($"开始扫描Modbus地址（{ScanAddressStart}-{ScanAddressEnd}），读功能码：{selectedFunctionCodeText}");
 
-            // 每多勾选一个功能码，无响应的地址就要多等一轮读超时
-            if (selectedFunctionCodes.Count > 1)
-            {
-                Log($"提示：已勾选 {selectedFunctionCodes.Count} 个读功能码，每个地址会依次尝试，"
-                    + $"无响应地址的等待时间约为单个功能码的 {selectedFunctionCodes.Count} 倍");
-            }
+            // 预计耗时：只有无响应的地址才会等满读超时，且每个已勾选的功能码各等一轮，
+            // 因此按最坏情况（所有地址都无响应）给出上界
+            int addressCount = ScanAddressEnd - ScanAddressStart + 1;
+            double worstSeconds = addressCount * (effectiveReadTimeoutMs + PerProbeOverheadMs) / 1000.0
+                                  * selectedFunctionCodes.Count;
+            Log($"预计扫描时间：最坏约 {FormatDuration(worstSeconds)}"
+                + $"（{addressCount} 个地址 × 读超时 {effectiveReadTimeoutMs} ms × {selectedFunctionCodes.Count} 个功能码，"
+                + "找到设备的地址会明显更快）");
 
             Stopwatch stopwatch = Stopwatch.StartNew();
             int scannedCount = 0;
@@ -244,8 +269,8 @@ namespace ModbusAddressScanner
             try
             {
                 // 地址 0 为广播地址（从机不应答），248~255 为保留地址，
-                // 因此只在 Modbus RTU 合法的从机地址范围 1~247 内扫描
-                for (byte address = 1; address <= 247; address++)
+                // 因此只在 ScanAddressStart ~ ScanAddressEnd 这段合法从机地址内扫描
+                for (byte address = ScanAddressStart; address <= ScanAddressEnd; address++)
                 {
                     if (token.IsCancellationRequested)
                     {
@@ -273,7 +298,7 @@ namespace ModbusAddressScanner
                     // 这里也不需要额外的扫描间隔：每次探测失败都已经等待了完整的读超时，
                     // 总线上的空闲时间远超 Modbus 要求的 3.5 个字符时间
                     if (address % 10 == 0)
-                        Log($"[进度] 已扫描 {address}/247，已发现 {foundAddresses.Count} 个从机...");
+                        Log($"[进度] 已扫描 {address}/{ScanAddressEnd}，已发现 {foundAddresses.Count} 个从机...");
                 }
 
                 if (!token.IsCancellationRequested && _isScanning)
