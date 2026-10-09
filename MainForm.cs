@@ -191,6 +191,10 @@ namespace ModbusAddressScanner
                         MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
+            catch (OperationCanceledException)
+            {
+                Log("扫描已取消");
+            }
             catch (Exception ex)
             {
                 Log($"扫描异常：{ex.Message}");
@@ -267,6 +271,11 @@ namespace ModbusAddressScanner
 
                 // 有返回结果则表示响应成功
                 return result != null && result.Length > 0;
+            }
+            catch (OperationCanceledException)
+            {
+                // 任务尚未开始执行就被取消，交由 StartScan 统一处理，不要当作"无响应"
+                throw;
             }
             catch (Modbus.SlaveException ex)
             {
