@@ -245,9 +245,17 @@ namespace ModbusAddressScanner
                 // 有返回结果则表示响应成功
                 return result != null && result.Length > 0;
             }
+            catch (Modbus.SlaveException ex)
+            {
+                // 从机返回异常响应帧（功能码 | 0x80）说明该从机真实存在，
+                // 只是拒绝了本次请求（典型情况：请求的寄存器地址不存在）。
+                // 这是一个带合法CRC的完整应答，同样应判定为"发现设备"。
+                Log($"✅ 地址 {slaveAddress} 存在（从机返回异常码 0x{(byte)ex.SlaveExceptionCode:X2}）");
+                return true;
+            }
             catch (Exception ex)
             {
-                // Modbus无响应会抛出异常，直接返回false
+                // 读超时、CRC校验失败等才会走到这里，说明该地址确实无响应
                 Log($"地址 {slaveAddress} 无响应：{ex.Message.Split('\n')[0]}");
                 return false;
             }
